@@ -13,7 +13,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/jnormore/go.grace"
+	"github.com/Shopify/go.grace"
 )
 
 var (
