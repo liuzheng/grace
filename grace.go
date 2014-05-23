@@ -35,6 +35,11 @@ var (
 	// SIGUSR1 signal. The normal use case for SIGUSR1 is to repon the
 	// log files.
 	OnSIGUSR1 func()
+
+	// ChildProcessWorkingDirectory defines the working directory to
+	// set for the child process on restart. If this is empty it will
+	// default to os.Getwd to determine it. Default is empty.
+	ChildProcessWorkingDirectory string
 )
 
 const (
@@ -219,6 +224,15 @@ func (p *Process) CloseParent() error {
 	return syscall.Kill(ppid, syscall.SIGTERM)
 }
 
+func (p *Process) getwdForChildProcess() (wd string, err error) {
+	if len(ChildProcessWorkingDirectory) == 0 {
+		wd, err = os.Getwd()
+	} else {
+		wd = ChildProcessWorkingDirectory
+	}
+	return
+}
+
 // Restart the process passing the given listeners to the new process.
 func (p *Process) Restart(listeners []Listener) (err error) {
 	if len(listeners) == 0 {
@@ -244,7 +258,7 @@ func (p *Process) Restart(listeners []Listener) (err error) {
 	}
 
 	// In order to keep the working directory the same as when we started.
-	wd, err := os.Getwd()
+	wd, err := p.getwdForChildProcess()
 	if err != nil {
 		return err
 	}
