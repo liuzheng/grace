@@ -37,6 +37,14 @@ type app struct {
 	errors          chan error
 }
 
+func guessProto(addr string) (proto string) {
+	if _, err := net.ResolveTCPAddr("tcp", addr); err == nil {
+		return "tcp"
+	}
+
+	return "unix"
+}
+
 func newApp(servers []*http.Server) *app {
 	return &app{
 		servers:   servers,
@@ -54,8 +62,7 @@ func newApp(servers []*http.Server) *app {
 
 func (a *app) listen() error {
 	for _, s := range a.servers {
-		// TODO: default addresses
-		l, err := a.net.Listen("tcp", s.Addr)
+		l, err := a.net.Listen(guessProto(s.Addr), s.Addr)
 		if err != nil {
 			return err
 		}
