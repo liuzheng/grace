@@ -1,6 +1,6 @@
 // Package gracehttp provides easy to use graceful restart
 // functionality for HTTP server.
-package gracehttp
+package grace
 
 import (
 	"bytes"
@@ -15,7 +15,7 @@ import (
 	"syscall"
 
 	"github.com/liuzheng/grace/gracenet"
-	"github.com/facebookgo/httpdown"
+	"github.com/liuzheng/grace/httpdown"
 )
 
 var (
