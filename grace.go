@@ -145,6 +145,7 @@ func (a *app) signalHandler(wg *sync.WaitGroup) {
 func (a *app) run() error {
 	// Acquire Listeners
 	if err := a.listen(); err != nil {
+		fmt.Println(err)
 		return err
 	}
 
@@ -154,12 +155,10 @@ func (a *app) run() error {
 			if ppid == 1 {
 				logger.Printf("Listening on init activated %s", pprintAddr(a.listeners))
 			} else {
-				const msg = "Graceful handoff of %s with new pid %d and old pid %d"
-				logger.Printf(msg, pprintAddr(a.listeners), os.Getpid(), ppid)
+				logger.Printf("Graceful handoff of %s with new pid %d and old pid %d", pprintAddr(a.listeners), os.Getpid(), ppid)
 			}
 		} else {
-			const msg = "Serving %s with pid %d"
-			logger.Printf(msg, pprintAddr(a.listeners), os.Getpid())
+			logger.Printf("Serving %s with pid %d", pprintAddr(a.listeners), os.Getpid())
 		}
 	}
 
