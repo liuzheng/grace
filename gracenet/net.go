@@ -247,6 +247,10 @@ func (n *Net) StartProcess() (int, error) {
 	return process.Pid, nil
 }
 
+func (n *Net) GetActiveListeners() ([]net.Listener, error) {
+	return n.activeListeners()
+}
+
 type filer interface {
 	File() (*os.File, error)
 }

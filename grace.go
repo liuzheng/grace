@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"reflect"
 	"sync"
 	"syscall"
 
@@ -24,45 +25,54 @@ var (
 	ppid       = os.Getppid()
 )
 
+type UdpServer struct {
+	Addr    string
+	Network string
+	Threads int
+	Data    interface{}
+	Handler func(*net.UDPConn, interface{})
+}
 type option func(*app)
 
 // An app contains one or more servers and associated configuration.
 type app struct {
-	servers         []*http.Server
+	httpServers     []*http.Server
+	udpServers      []*UdpServer
+	unixServers     []*net.UnixListener
 	http            *httpdown.HTTP
 	net             *gracenet.Net
 	listeners       []net.Listener
+	utpConnections  []*net.UDPConn
 	sds             []httpdown.Server
 	preStartProcess func() error
 	errors          chan error
 }
 
-func guessProto(addr string) (proto string) {
-	if _, err := net.ResolveTCPAddr("tcp", addr); err == nil {
-		return "tcp"
-	}
-
-	return "unix"
-}
-
-func newApp(servers []*http.Server) *app {
-	return &app{
-		servers:   servers,
-		http:      &httpdown.HTTP{},
-		net:       &gracenet.Net{},
-		listeners: make([]net.Listener, 0, len(servers)),
-		sds:       make([]httpdown.Server, 0, len(servers)),
+func newApp(servers []interface{}) *app {
+	App := app{
+		http: &httpdown.HTTP{},
+		net:  &gracenet.Net{},
 
 		preStartProcess: func() error { return nil },
 		// 2x num servers for possible Close or Stop errors + 1 for possible
 		// StartProcess error.
 		errors: make(chan error, 1+(len(servers)*2)),
 	}
+	for _, v := range servers {
+		if reflect.TypeOf(v).String() == "*http.Server" {
+			App.httpServers = append(App.httpServers, v.(*http.Server))
+		}
+	}
+	App.listeners = make([]net.Listener, 0, len(App.httpServers))
+	App.sds = make([]httpdown.Server, 0, len(App.httpServers))
+	//app.utpConnections=     make([]*net.UDPConn, 0, len_udp),
+
+	return &App
 }
 
 func (a *app) listen() error {
-	for _, s := range a.servers {
-		l, err := a.net.Listen(guessProto(s.Addr), s.Addr)
+	for _, s := range a.httpServers {
+		l, err := a.net.Listen("tcp", s.Addr)
 		if err != nil {
 			return err
 		}
@@ -75,7 +85,7 @@ func (a *app) listen() error {
 }
 
 func (a *app) serve() {
-	for i, s := range a.servers {
+	for i, s := range a.httpServers {
 		a.sds = append(a.sds, a.http.Serve(s, a.listeners[i]))
 	}
 }
@@ -185,7 +195,7 @@ func (a *app) run() error {
 
 // ServeWithOptions does the same as Serve, but takes a set of options to
 // configure the app struct.
-func ServeWithOptions(servers []*http.Server, options ...option) error {
+func ServeWithOptions(servers []interface{}, options ...option) error {
 	a := newApp(servers)
 	for _, opt := range options {
 		opt(a)
@@ -195,7 +205,7 @@ func ServeWithOptions(servers []*http.Server, options ...option) error {
 
 // Serve will serve the given http.Servers and will monitor for signals
 // allowing for graceful termination (SIGTERM) or restart (SIGUSR2).
-func Serve(servers ...*http.Server) error {
+func Serve(servers ...interface{}) error {
 	a := newApp(servers)
 	return a.run()
 }
