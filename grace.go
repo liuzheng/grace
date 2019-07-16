@@ -37,7 +37,7 @@ type option func(*app)
 // An app contains one or more servers and associated configuration.
 type app struct {
 	httpServers     []*http.Server
-	udpServers      []*UdpServer
+	udpServers      []*net.UDPConn
 	unixServers     []*net.UnixListener
 	http            *httpdown.HTTP
 	net             *gracenet.Net
@@ -45,6 +45,8 @@ type app struct {
 	utpConnections  []*net.UDPConn
 	sds             []httpdown.Server
 	preStartProcess func() error
+	preKillProcess  func() error
+	postKilledChild func() error
 	errors          chan error
 }
 
@@ -54,6 +56,8 @@ func newApp(servers []interface{}) *app {
 		net:  &gracenet.Net{},
 
 		preStartProcess: func() error { return nil },
+		preKillProcess:  func() error { return nil },
+		postKilledChild: func() error { return nil },
 		// 2x num servers for possible Close or Stop errors + 1 for possible
 		// StartProcess error.
 		errors: make(chan error, 1+(len(servers)*2)),
@@ -153,12 +157,12 @@ func (a *app) run() error {
 	if logger != nil {
 		if didInherit {
 			if ppid == 1 {
-				logger.Printf("Listening on init activated %s", pprintAddr(a.listeners))
+				logger.Printf("Listening on init activated %s", a.pprintAddr())
 			} else {
-				logger.Printf("Graceful handoff of %s with new pid %d and old pid %d", pprintAddr(a.listeners), os.Getpid(), ppid)
+				logger.Printf("Graceful handoff of %s with new pid %d and old pid %d", a.pprintAddr(), os.Getpid(), ppid)
 			}
 		} else {
-			logger.Printf("Serving %s with pid %d", pprintAddr(a.listeners), os.Getpid())
+			logger.Printf("Serving %s with pid %d", a.pprintAddr(), os.Getpid())
 		}
 	}
 
@@ -219,18 +223,26 @@ func PreStartProcess(hook func() error) option {
 }
 
 // Used for pretty printing addresses.
-func pprintAddr(listeners []net.Listener) []byte {
+func (a *app) pprintAddr() []byte {
 	var out bytes.Buffer
-	for i, l := range listeners {
+	fmt.Fprint(&out, "[HTTP]")
+	for i, l := range a.listeners {
 		if i != 0 {
 			fmt.Fprint(&out, ", ")
 		}
 		fmt.Fprint(&out, l.Addr())
 	}
+	fmt.Fprint(&out, " [UDP]")
+	for i, l := range a.udpServers {
+		if i != 0 {
+			fmt.Fprint(&out, ", ")
+		}
+		fmt.Fprint(&out, l.LocalAddr())
+	}
 	return out.Bytes()
 }
 
-// SetLogger sets logger to be able to grab some useful logs
-func SetLogger(l *log.Logger) {
-	logger = l
-}
+//// SetLogger sets logger to be able to grab some useful logs
+//func SetLogger(l *log.Logger) {
+//	logger = l
+//}
