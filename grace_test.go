@@ -1,4 +1,4 @@
-package gracehttp_test
+package grace
 
 import (
 	"bufio"
