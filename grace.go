@@ -17,7 +17,7 @@ import (
 
   "github.com/liuzheng/grace/gracenet"
   "github.com/liuzheng/grace/httpdown"
-  "github.com/liuzheng/grace/tcpdown"
+  "github.com/liuzheng/grace/tcp"
 )
 
 var (
@@ -26,22 +26,24 @@ var (
   ppid       = os.Getppid()
 )
 
-
 type option func(*app)
 
 // An app contains one or more servers and associated configuration.
 type app struct {
   httpServers []*http.Server
   udpServers  []*net.UDPConn
-  TCPServers  []*net.TCPListener
+  TCPServers  []*tcp.TcpServer
   unixServers []*net.UnixListener
 
-  http      *httpdown.HTTP
-  net       *gracenet.Net
-  listeners []net.Listener
+  http *httpdown.HTTP
+  net  *gracenet.Net
+  tcp  *tcp.Tcp
+
+  listeners    []net.Listener
+  tcpListeners []net.Listener
 
   httpDownServer  []httpdown.Server
-  tcpDownServer   []tcpdown.Server
+  tcpDownServer   []tcp.Server
   preStartProcess func() error
   preKillProcess  func() error
   postKilledChild func() error
@@ -62,7 +64,7 @@ func newApp(servers []interface{}) *app {
   }
   for _, v := range servers {
     switch reflect.TypeOf(v).String() {
-    case "*net.TCPListener":
+    case "*tcp.TcpServer":
       App.TCPServers = append(App.TCPServers, v.(*net.TCPListener))
     case "*http.Server":
       App.httpServers = append(App.httpServers, v.(*http.Server))
@@ -74,7 +76,8 @@ func newApp(servers []interface{}) *app {
       fmt.Println("[Error] Unknown Server Type! Abandon!")
     }
   }
-  App.listeners = make([]net.Listener, 0, len(App.httpServers)+len(App.TCPServers))
+  App.listeners = make([]net.Listener, 0, len(App.httpServers))
+  App.tcpListeners = make([]net.Listener, 0, len(App.TCPServers))
   App.httpDownServer = make([]httpdown.Server, 0, len(App.httpServers))
   App.tcpDownServer = make([]tcpdown.Server, 0, len(App.tcpDownServer))
   //app.udpServers=     make([]*net.UDPConn, 0, len_udp),
@@ -93,7 +96,16 @@ func (a *app) listen() error {
     }
     a.listeners = append(a.listeners, l)
   }
-
+  for i, s := range a.TCPServers {
+    l, err := a.net.Listen("tcp", s.Addr)
+    if err != nil {
+      return err
+    }
+    if s.TLSConfig != nil {
+      l = tls.NewListener(l, s.TLSConfig)
+    }
+    a.tcpListeners = append(a.tcpListeners, l)
+  }
   return nil
 }
 
@@ -101,10 +113,10 @@ func (a *app) serve() {
   for i, s := range a.httpServers {
     a.httpDownServer = append(a.httpDownServer, a.http.Serve(s, a.listeners[i]))
   }
-  //for i, s := range a.TCPServers {
-  // // ToDo:
-  //  a.tcpDownServer = append(a.tcpDownServer, a.http.Serve(s, a.listeners[i]))
-  //}
+  for i, s := range a.TCPServers {
+    // ToDo:
+    a.tcpDownServer = append(a.tcpDownServer, a.http.Serve(s, a.listeners[i]))
+  }
 }
 
 func (a *app) wait() {
