@@ -19,7 +19,42 @@ const (
 	defaultStopTimeout = time.Minute
 	defaultKillTimeout = time.Minute
 )
+type ConnState int
+const (
+	// StateNew represents a new connection that is expected to
+	// send a request immediately. Connections begin at this
+	// state and then transition to either StateActive or
+	// StateClosed.
+	StateNew ConnState = iota
 
+	// StateActive represents a connection that has read 1 or more
+	// bytes of a request. The Server.ConnState hook for
+	// StateActive fires before the request has entered a handler
+	// and doesn't fire again until the request has been
+	// handled. After the request is handled, the state
+	// transitions to StateClosed, StateHijacked, or StateIdle.
+	// For HTTP/2, StateActive fires on the transition from zero
+	// to one active request, and only transitions away once all
+	// active requests are complete. That means that ConnState
+	// cannot be used to do per-request work; ConnState only notes
+	// the overall state of the connection.
+	StateActive
+
+	// StateIdle represents a connection that has finished
+	// handling a request and is in the keep-alive state, waiting
+	// for a new request. Connections transition from StateIdle
+	// to either StateActive or StateClosed.
+	StateIdle
+
+	// StateHijacked represents a hijacked connection.
+	// This is a terminal state. It does not transition to StateClosed.
+	StateHijacked
+
+	// StateClosed represents a closed connection.
+	// This is a terminal state. Hijacked connections do not
+	// transition to StateClosed.
+	StateClosed
+)
 type TcpServer struct {
 	Addr    string // TCP address to listen on, ":http" if empty
 	Serve   func(l net.Listener) error
@@ -82,7 +117,7 @@ type TcpServer struct {
 	// ConnState specifies an optional callback function that is
 	// called when a client connection changes state. See the
 	// ConnState type and associated constants for details.
-	//ConnState func(net.Conn, ConnState)
+	ConnState func(net.Conn, ConnState)
 
 	// ErrorLog specifies an optional logger for errors accepting
 	// connections, unexpected behavior from handlers, and
@@ -100,6 +135,7 @@ type TcpServer struct {
 	//activeConn map[*conn]struct{}
 	doneChan   chan struct{}
 	onShutdown []func()
+
 }
 
 // A Server allows encapsulates the process of accepting new connections and
@@ -116,28 +152,59 @@ type Server interface {
 	Stop() error
 }
 type Tcp struct {
-  // StopTimeout is the duration before we begin force closing connections.
-  // Defaults to 1 minute.
-  StopTimeout time.Duration
+	// StopTimeout is the duration before we begin force closing connections.
+	// Defaults to 1 minute.
+	StopTimeout time.Duration
 
-  // KillTimeout is the duration before which we completely give up and abort
-  // even though we still have connected clients. This is useful when a large
-  // number of client connections exist and closing them can take a long time.
-  // Note, this is in addition to the StopTimeout. Defaults to 1 minute.
-  KillTimeout time.Duration
+	// KillTimeout is the duration before which we completely give up and abort
+	// even though we still have connected clients. This is useful when a large
+	// number of client connections exist and closing them can take a long time.
+	// Note, this is in addition to the StopTimeout. Defaults to 1 minute.
+	KillTimeout time.Duration
 
-  // Stats is optional. If provided, it will be used to record various metrics.
-  Stats stats.Client
+	// Stats is optional. If provided, it will be used to record various metrics.
+	Stats stats.Client
 
-  // Clock allows for testing timing related functionality. Do not specify this
-  // in production code.
-  Clock clock.Clock
-} 
-
-func (t Tcp) Serve(l net.Listener)Server{
-  
+	// Clock allows for testing timing related functionality. Do not specify this
+	// in production code.
+	Clock clock.Clock
 }
 
+func (t Tcp) Serve(ts *TcpServer, l net.Listener) Server {
+	stopTimeout := t.StopTimeout
+	if stopTimeout == 0 {
+		stopTimeout = defaultStopTimeout
+	}
+	killTimeout := t.KillTimeout
+	if killTimeout == 0 {
+		killTimeout = defaultKillTimeout
+	}
+	klock := t.Clock
+	if klock == nil {
+		klock = clock.New()
+	}
+	ss := &server{
+		stopTimeout:  stopTimeout,
+		killTimeout:  killTimeout,
+		stats:        t.Stats,
+		clock:        klock,
+		oldConnState: ts.ConnState,
+		listener:     l,
+		server:       ts,
+		serveDone:    make(chan struct{}),
+		serveErr:     make(chan error, 1),
+		new:          make(chan net.Conn),
+		active:       make(chan net.Conn),
+		idle:         make(chan net.Conn),
+		closed:       make(chan net.Conn),
+		stop:         make(chan chan struct{}),
+		kill:         make(chan chan struct{}),
+	}
+	ts.ConnState = ss.connState
+	go ss.manage()
+	go ss.serve()
+	return ss
+}
 
 //// HTTP defines the configuration for serving a http.Server. Multiple calls to
 //// Serve or ListenAndServe can be made on the same HTTP instance. The default
@@ -234,8 +301,8 @@ type server struct {
 	stats       stats.Client
 	clock       clock.Clock
 
-	oldConnState func(net.Conn, http.ConnState)
-	server       *http.Server
+	oldConnState func(net.Conn, ConnState)
+	server       *TcpServer
 	serveDone    chan struct{}
 	serveErr     chan error
 	listener     net.Listener
@@ -251,19 +318,19 @@ type server struct {
 	stopErr  error
 }
 
-func (s *server) connState(c net.Conn, cs http.ConnState) {
+func (s *server) connState(c net.Conn, cs ConnState) {
 	if s.oldConnState != nil {
 		s.oldConnState(c, cs)
 	}
 
 	switch cs {
-	case http.StateNew:
+	case StateNew:
 		s.new <- c
-	case http.StateActive:
+	case StateActive:
 		s.active <- c
-	case http.StateIdle:
+	case StateIdle:
 		s.idle <- c
-	case http.StateHijacked, http.StateClosed:
+	case StateHijacked, StateClosed:
 		s.closed <- c
 	}
 }
@@ -397,7 +464,8 @@ func (s *server) Stop() error {
 		stats.BumpSum(s.stats, "stop", 1)
 
 		// first disable keep-alive for new connections
-		s.server.SetKeepAlivesEnabled(false)
+		// ToDo:
+		//s.server.SetKeepAlivesEnabled(false)
 
 		// then close the listener so new connections can't connect come thru
 		closeErr := s.listener.Close()
