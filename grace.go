@@ -79,7 +79,7 @@ func newApp(servers []interface{}) *app {
 	App.listeners = make([]net.Listener, 0, len(App.httpServers))
 	App.tcpListeners = make([]net.Listener, 0, len(App.TCPServers))
 	App.httpDownServer = make([]httpdown.Server, 0, len(App.httpServers))
-	App.tcpDownServer = make([]tcp.Server, 0, len(App.tcpDownServer))
+	App.tcpDownServer = make([]tcp.Server, 0, len(App.TCPServers))
 	//app.udpServers=     make([]*net.UDPConn, 0, len_udp),
 
 	return &App
