@@ -19,7 +19,9 @@ const (
 	defaultStopTimeout = time.Minute
 	defaultKillTimeout = time.Minute
 )
+
 type ConnState int
+
 const (
 	// StateNew represents a new connection that is expected to
 	// send a request immediately. Connections begin at this
@@ -55,6 +57,7 @@ const (
 	// transition to StateClosed.
 	StateClosed
 )
+
 type TcpServer struct {
 	Addr    string // TCP address to listen on, ":http" if empty
 	Serve   func(l net.Listener) error
@@ -135,7 +138,6 @@ type TcpServer struct {
 	//activeConn map[*conn]struct{}
 	doneChan   chan struct{}
 	onShutdown []func()
-
 }
 
 // A Server allows encapsulates the process of accepting new connections and

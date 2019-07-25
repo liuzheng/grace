@@ -6,18 +6,20 @@ import (
 	"bytes"
 	"crypto/tls"
 	"fmt"
+	"github.com/liuzheng/grace/gracenet"
+	"github.com/liuzheng/grace/httpdown"
+	"github.com/liuzheng/grace/tcp"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"reflect"
+	"strconv"
 	"sync"
 	"syscall"
-
-	"github.com/liuzheng/grace/gracenet"
-	"github.com/liuzheng/grace/httpdown"
-	"github.com/liuzheng/grace/tcp"
+	"time"
 )
 
 var (
@@ -45,7 +47,7 @@ type app struct {
 	httpDownServer  []httpdown.Server
 	tcpDownServer   []tcp.Server
 	preStartProcess func() error
-	preKillProcess  func() error
+	//preKillProcess  func() error
 	postKilledChild func() error
 	errors          chan error
 }
@@ -54,9 +56,10 @@ func newApp(servers []interface{}) *app {
 	App := app{
 		http: &httpdown.HTTP{},
 		net:  &gracenet.Net{},
+		tcp:  &tcp.Tcp{},
 
 		preStartProcess: func() error { return nil },
-		preKillProcess:  func() error { return nil },
+		//preKillProcess:  func() error { return nil },
 		postKilledChild: func() error { return nil },
 		// 2x num servers for possible Close or Stop errors + 1 for possible
 		// StartProcess error.
@@ -115,7 +118,7 @@ func (a *app) serve() {
 	}
 	for i, s := range a.TCPServers {
 		// ToDo:
-		a.tcpDownServer = append(a.tcpDownServer, a.tcp.Serve(s, a.listeners[i]))
+		a.tcpDownServer = append(a.tcpDownServer, a.tcp.Serve(s, a.tcpListeners[i]))
 	}
 }
 
@@ -183,6 +186,10 @@ func (a *app) signalHandler(wg *sync.WaitGroup) {
 			if _, err := a.net.StartProcess(); err != nil {
 				a.errors <- err
 			}
+			err = a.preKillProcess()
+			if err != nil {
+				a.errors <- err
+			}
 		}
 	}
 }
@@ -235,6 +242,22 @@ func (a *app) run() error {
 		}
 		return nil
 	}
+}
+
+func (a *app) preKillProcess() (err error) {
+	for _, l := range a.tcpListeners {
+		l.Close()
+	}
+	ticker := time.NewTicker(time.Second * 5)
+	for range ticker.C {
+		lsof := exec.Command("lsof", "-p", strconv.Itoa(os.Getpid()), "-a", "-i", "tcp")
+		out, _ := lsof.Output()
+		lsofout := string(out)
+		if lsofout == "" {
+			os.Exit(0)
+		}
+	}
+	return
 }
 
 // ServeWithOptions does the same as Serve, but takes a set of options to
