@@ -62,7 +62,7 @@ func newApp(servers []interface{}) *app {
 		errors: make(chan error, 1+(len(servers)*2)),
 	}
 	for _, server := range servers {
-		App.TCPServers = append(App.TCPServers, server.(*tcp.TcpServer))
+		App.TCPServers = append(App.TCPServers, tcp.Gen(server))
 		//switch reflect.TypeOf(v).String() {
 		//case "*tcp.TcpServer":
 		//	App.TCPServers = append(App.TCPServers, v.(*tcp.TcpServer))
@@ -184,7 +184,7 @@ func (a *app) run() error {
 	//
 	//// Start serving.
 	//a.serve()
-	go a.ListenAndServe()
+	 a.ListenAndServe()
 
 	// Close the parent if we inherited and it wasn't init that started us.
 	if didInherit && ppid != 1 {

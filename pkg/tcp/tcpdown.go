@@ -3,11 +3,11 @@
 package tcp
 
 import (
-	"crypto/tls"
 	"github.com/facebookgo/clock"
 	"github.com/facebookgo/stats"
 	"net"
 	"net/http"
+	"reflect"
 	"sync"
 	"time"
 )
@@ -18,22 +18,19 @@ const (
 )
 
 type TcpServer struct {
-	// Addr optionally specifies the TCP address for the server to listen on,
-	// in the form "host:port". If empty, ":http" (port 80) is used.
-	// The service names are defined in RFC 6335 and assigned by IANA.
-	// See net.Dial for details of the address format.
-	Addr string
-
-	// TLSConfig optionally provides a TLS configuration for use
-	// by ServeTLS and ListenAndServeTLS. Note that this value is
-	// cloned by ServeTLS and ListenAndServeTLS, so it's not
-	// possible to modify the configuration with methods like
-	// tls.Config.SetSessionTicketKeys. To use
-	// SetSessionTicketKeys, use Server.Serve with a TLS Listener
-	// instead.
-	TLSConfig      *tls.Config
-	ListenAndServe func()
+	Server interface{}
 }
+
+func (t *TcpServer) ListenAndServe() {
+	reflect.ValueOf(t.Server).MethodByName("ListenAndServe").Call([]reflect.Value{})
+}
+
+func Gen(server interface{}) *TcpServer {
+	return &TcpServer{
+		Server: server,
+	}
+}
+
 type Server interface {
 	// Wait waits for the serving loop to finish. This will happen when Stop is
 	// called, at which point it returns no error, or if there is an error in the
