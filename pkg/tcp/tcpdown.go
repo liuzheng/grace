@@ -19,6 +19,9 @@ func (t *TcpServer) Shutdown(ctx context.Context) {
 		reflect.ValueOf(ctx),
 	})
 }
+func (t *TcpServer) Addr() string {
+	return reflect.ValueOf(t.Server).FieldByName("Addr").String()
+}
 func Gen(server interface{}) *TcpServer {
 	return &TcpServer{
 		Server: server,

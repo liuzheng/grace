@@ -3,12 +3,12 @@
 package grace
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
 	"sync"
 	"syscall"
@@ -34,14 +34,11 @@ type app struct {
 	TCPServers  []*tcp.TcpServer
 	unixServers []*net.UnixListener
 
-	tcp *tcp.TCP
 	net *gracenet.Net
 
 	listeners    []net.Listener
 	tcpListeners []net.Listener
 
-	TcpDownServer []tcp.Server
-	//tcpDownServer   []tcp.Server
 	preStartProcess func() error
 	preKillProcess  func() error
 	postKilledChild func() error
@@ -51,7 +48,6 @@ type app struct {
 func newApp(servers []interface{}) *app {
 	App := app{
 		servers:   servers,
-		tcp:       &tcp.TCP{},
 		net:       &gracenet.Net{},
 		listeners: make([]net.Listener, 0, len(servers)),
 		//sds:       make([]httpdown.Server, 0, len(servers)),
@@ -79,7 +75,7 @@ func newApp(servers []interface{}) *app {
 		//}
 	}
 	//App.listeners = make([]net.Listener, 0, len(App.httpServers))
-	//App.tcpListeners = make([]net.Listener, 0, len(App.TCPServers))
+	App.tcpListeners = make([]net.Listener, 0, len(App.TCPServers))
 	//App.httpDownServer = make([]httpdown.Server, 0, len(App.httpServers))
 	//App.tcpDownServer = make([]tcp.Server, 0, len(App.TCPServers))
 	//app.udpServers=     make([]*net.UDPConn, 0, len_udp),
@@ -107,14 +103,19 @@ func newApp(servers []interface{}) *app {
 //	}
 //}
 func (a *app) listenAndServe() {
-	for _, s := range a.TCPServers {
+	var err error
+	for i, s := range a.TCPServers {
 		s.ListenAndServe()
+		a.tcpListeners[i], err = net.Listen("tcp", s.Addr())
+		if err != nil {
+
+		}
 	}
 }
 
 func (a *app) wait() {
 	var wg sync.WaitGroup
-	wg.Add(len(a.TcpDownServer)) // Wait & Stop
+	wg.Add(len(a.TCPServers)) // Wait & Stop
 	go a.signalHandler(&wg)
 	//for _, s := range a.TcpDownServer {
 	//	go func(s tcp.Server) {
@@ -159,14 +160,17 @@ func (a *app) signalHandler(wg *sync.WaitGroup) {
 			}
 			// we only return here if there's an error, otherwise the new process
 			// will send us a TERM when it's ready to trigger the actual shutdown.
-			if _, err := a.net.StartProcess(); err != nil {
+			if _, err := a.StartProcess(); err != nil {
 				a.errors <- err
 			}
 		}
 	}
 }
 
-func (a *app) run() error {
+// Serve will serve the given http.Servers and will monitor for signals
+// allowing for graceful termination (SIGTERM) or restart (SIGUSR2).
+func Serve(servers ...interface{}) error {
+	a := newApp(servers)
 	go a.listenAndServe()
 
 	// Close the parent if we inherited and it wasn't init that started us.
@@ -196,48 +200,15 @@ func (a *app) run() error {
 	}
 }
 
-// ServeWithOptions does the same as Serve, but takes a set of options to
-// configure the app struct.
-//func ServeWithOptions(servers []interface{}, options ...option) error {
-//	a := newApp(servers)
-//	for _, opt := range options {
-//		opt(a)
-//	}
-//	return a.run()
-//}
+func (a *app) StartProcess() (int, error) {
 
-// Serve will serve the given http.Servers and will monitor for signals
-// allowing for graceful termination (SIGTERM) or restart (SIGUSR2).
-func Serve(servers ...interface{}) {
-	a := newApp(servers)
-	a.run()
-}
+	cmd := exec.Command(path, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.ExtraFiles = []*os.File{file}
 
-// PreStartProcess configures a callback to trigger during graceful restart
-// directly before starting the successor process. This allows the current
-// process to release holds on resources that the new process will need.
-func PreStartProcess(hook func() error) option {
-	return func(a *app) {
-		a.preStartProcess = hook
+	err := cmd.Start()
+	if err != nil {
+		log.Fatalf("gracefulRestart: Failed to launch, error: %v", err)
 	}
-}
-
-// Used for pretty printing addresses.
-func (a *app) pprintAddr() []byte {
-	var out bytes.Buffer
-	fmt.Fprint(&out, "[TCP]")
-	for i, l := range a.listeners {
-		if i != 0 {
-			fmt.Fprint(&out, ", ")
-		}
-		fmt.Fprint(&out, l.Addr())
-	}
-	//fmt.Fprint(&out, " [UDP]")
-	//for i, l := range a.udpServers {
-	//	if i != 0 {
-	//		fmt.Fprint(&out, ", ")
-	//	}
-	//	fmt.Fprint(&out, l.LocalAddr())
-	//}
-	return out.Bytes()
 }
