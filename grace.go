@@ -4,20 +4,16 @@ package grace
 
 import (
 	"bytes"
-	"crypto/tls"
 	"fmt"
 	"log"
 	"net"
-	"net/http"
 	"os"
 	"os/signal"
-	"reflect"
 	"sync"
 	"syscall"
 
-	"github.com/liuzheng/grace/gracenet"
-	"github.com/liuzheng/grace/httpdown"
-	"github.com/liuzheng/grace/tcp"
+	"github.com/liuzheng/grace/pkg/gracenet"
+	"github.com/liuzheng/grace/pkg/tcp"
 )
 
 var (
@@ -30,20 +26,20 @@ type option func(*app)
 
 // An app contains one or more servers and associated configuration.
 type app struct {
-	httpServers []*http.Server
-	udpServers  []*net.UDPConn
+	servers []interface{}
+
+	//UdpServers  []*net.UDPConn
 	TCPServers  []*tcp.TcpServer
 	unixServers []*net.UnixListener
 
-	http *httpdown.HTTP
-	net  *gracenet.Net
-	tcp  *tcp.Tcp
+	tcp *tcp.TCP
+	net *gracenet.Net
 
 	listeners    []net.Listener
 	tcpListeners []net.Listener
 
-	httpDownServer  []httpdown.Server
-	tcpDownServer   []tcp.Server
+	TcpDownServer []tcp.Server
+	//tcpDownServer   []tcp.Server
 	preStartProcess func() error
 	preKillProcess  func() error
 	postKilledChild func() error
@@ -52,8 +48,11 @@ type app struct {
 
 func newApp(servers []interface{}) *app {
 	App := app{
-		http: &httpdown.HTTP{},
-		net:  &gracenet.Net{},
+		servers:   servers,
+		tcp:       &tcp.TCP{},
+		net:       &gracenet.Net{},
+		listeners: make([]net.Listener, 0, len(servers)),
+		//sds:       make([]httpdown.Server, 0, len(servers)),
 
 		preStartProcess: func() error { return nil },
 		preKillProcess:  func() error { return nil },
@@ -62,76 +61,60 @@ func newApp(servers []interface{}) *app {
 		// StartProcess error.
 		errors: make(chan error, 1+(len(servers)*2)),
 	}
-	for _, v := range servers {
-		switch reflect.TypeOf(v).String() {
-		case "*tcp.TcpServer":
-			App.TCPServers = append(App.TCPServers, v.(*tcp.TcpServer))
-		case "*http.Server":
-			App.httpServers = append(App.httpServers, v.(*http.Server))
-		case "*net.UDPConn":
-			App.udpServers = append(App.udpServers, v.(*net.UDPConn))
-		case "*net.UnixListener":
-			App.unixServers = append(App.unixServers, v.(*net.UnixListener))
-		default:
-			fmt.Println("[Error] Unknown Server Type! Abandon!")
-		}
+	for _, server := range servers {
+		App.TCPServers = append(App.TCPServers, server.(*tcp.TcpServer))
+		//switch reflect.TypeOf(v).String() {
+		//case "*tcp.TcpServer":
+		//	App.TCPServers = append(App.TCPServers, v.(*tcp.TcpServer))
+		//case "*http.Server":
+		//	App.httpServers = append(App.httpServers, v.(*http.Server))
+		//case "*net.UDPConn":
+		//	App.udpServers = append(App.udpServers, v.(*net.UDPConn))
+		//case "*net.UnixListener":
+		//	App.unixServers = append(App.unixServers, v.(*net.UnixListener))
+		//default:
+		//	fmt.Println("[Error] Unknown Server Type! Abandon!")
+		//}
 	}
-	App.listeners = make([]net.Listener, 0, len(App.httpServers))
-	App.tcpListeners = make([]net.Listener, 0, len(App.TCPServers))
-	App.httpDownServer = make([]httpdown.Server, 0, len(App.httpServers))
-	App.tcpDownServer = make([]tcp.Server, 0, len(App.TCPServers))
+	//App.listeners = make([]net.Listener, 0, len(App.httpServers))
+	//App.tcpListeners = make([]net.Listener, 0, len(App.TCPServers))
+	//App.httpDownServer = make([]httpdown.Server, 0, len(App.httpServers))
+	//App.tcpDownServer = make([]tcp.Server, 0, len(App.TCPServers))
 	//app.udpServers=     make([]*net.UDPConn, 0, len_udp),
 
 	return &App
 }
 
-func (a *app) listen() error {
-	for _, s := range a.httpServers {
-		l, err := a.net.Listen("tcp", s.Addr)
-		if err != nil {
-			return err
-		}
-		if s.TLSConfig != nil {
-			l = tls.NewListener(l, s.TLSConfig)
-		}
-		a.listeners = append(a.listeners, l)
-	}
-	for _, s := range a.TCPServers {
-		l, err := a.net.Listen("tcp", s.Addr)
-		if err != nil {
-			return err
-		}
-		if s.TLSConfig != nil {
-			l = tls.NewListener(l, s.TLSConfig)
-		}
-		a.tcpListeners = append(a.tcpListeners, l)
-	}
-	return nil
-}
+//func (a *app) listen() error {
+//	for _, s := range a.TCPServers {
+//		l, err := a.net.Listen("tcp", s.Addr)
+//		if err != nil {
+//			return err
+//		}
+//		if s.TLSConfig != nil {
+//			l = tls.NewListener(l, s.TLSConfig)
+//		}
+//		a.listeners = append(a.listeners, l)
+//	}
+//	return nil
+//}
 
-func (a *app) serve() {
-	for i, s := range a.httpServers {
-		a.httpDownServer = append(a.httpDownServer, a.http.Serve(s, a.listeners[i]))
-	}
-	for i, s := range a.TCPServers {
-		// ToDo:
-		a.tcpDownServer = append(a.tcpDownServer, a.tcp.Serve(s, a.listeners[i]))
+//func (a *app) serve() {
+//	for i, s := range a.TCPServers {
+//		a.TcpDownServer = append(a.TcpDownServer, a.tcp.Serve(s, a.listeners[i]))
+//	}
+//}
+func (a *app) ListenAndServe() {
+	for _, s := range a.TCPServers {
+		go s.ListenAndServe()
 	}
 }
 
 func (a *app) wait() {
 	var wg sync.WaitGroup
-	wg.Add((len(a.httpDownServer) + len(a.tcpDownServer)) * 2) // Wait & Stop
+	wg.Add(len(a.TcpDownServer) * 2) // Wait & Stop
 	go a.signalHandler(&wg)
-	for _, s := range a.httpDownServer {
-		go func(s httpdown.Server) {
-			defer wg.Done()
-			if err := s.Wait(); err != nil {
-				a.errors <- err
-			}
-		}(s)
-	}
-	for _, s := range a.tcpDownServer {
+	for _, s := range a.TcpDownServer {
 		go func(s tcp.Server) {
 			defer wg.Done()
 			if err := s.Wait(); err != nil {
@@ -143,15 +126,7 @@ func (a *app) wait() {
 }
 
 func (a *app) term(wg *sync.WaitGroup) {
-	for _, s := range a.httpDownServer {
-		go func(s httpdown.Server) {
-			defer wg.Done()
-			if err := s.Stop(); err != nil {
-				a.errors <- err
-			}
-		}(s)
-	}
-	for _, s := range a.tcpDownServer {
+	for _, s := range a.TcpDownServer {
 		go func(s tcp.Server) {
 			defer wg.Done()
 			if err := s.Stop(); err != nil {
@@ -189,26 +164,27 @@ func (a *app) signalHandler(wg *sync.WaitGroup) {
 
 func (a *app) run() error {
 	// Acquire Listeners
-	if err := a.listen(); err != nil {
-		fmt.Println(err)
-		return err
-	}
+	//if err := a.listen(); err != nil {
+	//	fmt.Println(err)
+	//	return err
+	//}
 
-	// Some useful logging.
-	if logger != nil {
-		if didInherit {
-			if ppid == 1 {
-				logger.Printf("Listening on init activated %s", a.pprintAddr())
-			} else {
-				logger.Printf("Graceful handoff of %s with new pid %d and old pid %d", a.pprintAddr(), os.Getpid(), ppid)
-			}
-		} else {
-			logger.Printf("Serving %s with pid %d", a.pprintAddr(), os.Getpid())
-		}
-	}
-
-	// Start serving.
-	a.serve()
+	//// Some useful logging.
+	//if logger != nil {
+	//	if didInherit {
+	//		if ppid == 1 {
+	//			logger.Printf("Listening on init activated %s", a.pprintAddr())
+	//		} else {
+	//			logger.Printf("Graceful handoff of %s with new pid %d and old pid %d", a.pprintAddr(), os.Getpid(), ppid)
+	//		}
+	//	} else {
+	//		logger.Printf("Serving %s with pid %d", a.pprintAddr(), os.Getpid())
+	//	}
+	//}
+	//
+	//// Start serving.
+	//a.serve()
+	go a.ListenAndServe()
 
 	// Close the parent if we inherited and it wasn't init that started us.
 	if didInherit && ppid != 1 {
@@ -239,13 +215,13 @@ func (a *app) run() error {
 
 // ServeWithOptions does the same as Serve, but takes a set of options to
 // configure the app struct.
-func ServeWithOptions(servers []interface{}, options ...option) error {
-	a := newApp(servers)
-	for _, opt := range options {
-		opt(a)
-	}
-	return a.run()
-}
+//func ServeWithOptions(servers []interface{}, options ...option) error {
+//	a := newApp(servers)
+//	for _, opt := range options {
+//		opt(a)
+//	}
+//	return a.run()
+//}
 
 // Serve will serve the given http.Servers and will monitor for signals
 // allowing for graceful termination (SIGTERM) or restart (SIGUSR2).
@@ -266,19 +242,19 @@ func PreStartProcess(hook func() error) option {
 // Used for pretty printing addresses.
 func (a *app) pprintAddr() []byte {
 	var out bytes.Buffer
-	fmt.Fprint(&out, "[HTTP]")
+	fmt.Fprint(&out, "[TCP]")
 	for i, l := range a.listeners {
 		if i != 0 {
 			fmt.Fprint(&out, ", ")
 		}
 		fmt.Fprint(&out, l.Addr())
 	}
-	fmt.Fprint(&out, " [UDP]")
-	for i, l := range a.udpServers {
-		if i != 0 {
-			fmt.Fprint(&out, ", ")
-		}
-		fmt.Fprint(&out, l.LocalAddr())
-	}
+	//fmt.Fprint(&out, " [UDP]")
+	//for i, l := range a.udpServers {
+	//	if i != 0 {
+	//		fmt.Fprint(&out, ", ")
+	//	}
+	//	fmt.Fprint(&out, l.LocalAddr())
+	//}
 	return out.Bytes()
 }

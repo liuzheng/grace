@@ -1,4 +1,4 @@
-package udpdown
+package udp
 
 import "net"
 
