@@ -4,6 +4,7 @@ package grace
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/liuzheng/grace/pkg/gracenet"
 	"github.com/liuzheng/grace/pkg/tcp"
@@ -104,34 +106,36 @@ func newApp(servers []interface{}) *app {
 //		a.TcpDownServer = append(a.TcpDownServer, a.tcp.Serve(s, a.listeners[i]))
 //	}
 //}
-func (a *app) ListenAndServe() {
+func (a *app) listenAndServe() {
 	for _, s := range a.TCPServers {
-		go s.ListenAndServe()
+		s.ListenAndServe()
 	}
 }
 
-func (a *app) wait() {
-	var wg sync.WaitGroup
-	wg.Add(len(a.TcpDownServer) * 2) // Wait & Stop
-	go a.signalHandler(&wg)
-	for _, s := range a.TcpDownServer {
-		go func(s tcp.Server) {
-			defer wg.Done()
-			if err := s.Wait(); err != nil {
-				a.errors <- err
-			}
-		}(s)
-	}
-	wg.Wait()
-}
+//func (a *app) wait() {
+//	var wg sync.WaitGroup
+//	wg.Add(len(a.TcpDownServer) * 2) // Wait & Stop
+//	go a.signalHandler(&wg)
+//	for _, s := range a.TcpDownServer {
+//		go func(s tcp.Server) {
+//			defer wg.Done()
+//			if err := s.Wait(); err != nil {
+//				a.errors <- err
+//			}
+//		}(s)
+//	}
+//	wg.Wait()
+//}
 
-func (a *app) term(wg *sync.WaitGroup) {
-	for _, s := range a.TcpDownServer {
-		go func(s tcp.Server) {
+func (a *app) shutdown(wg *sync.WaitGroup) {
+	for _, s := range a.TCPServers {
+		go func(s *tcp.TcpServer) {
 			defer wg.Done()
-			if err := s.Stop(); err != nil {
-				a.errors <- err
-			}
+			ctx, _ := context.WithTimeout(context.Background(), 20*time.Second)
+			s.Shutdown(ctx)
+			//if err := s.Stop(); err != nil {
+			//	a.errors <- err
+			//}
 		}(s)
 	}
 }
@@ -146,7 +150,7 @@ func (a *app) signalHandler(wg *sync.WaitGroup) {
 			// this ensures a subsequent INT/TERM will trigger standard go behaviour of
 			// terminating.
 			signal.Stop(ch)
-			a.term(wg)
+			a.shutdown(wg)
 			return
 		case syscall.SIGUSR2:
 			err := a.preStartProcess()
@@ -163,28 +167,7 @@ func (a *app) signalHandler(wg *sync.WaitGroup) {
 }
 
 func (a *app) run() error {
-	// Acquire Listeners
-	//if err := a.listen(); err != nil {
-	//	fmt.Println(err)
-	//	return err
-	//}
-
-	//// Some useful logging.
-	//if logger != nil {
-	//	if didInherit {
-	//		if ppid == 1 {
-	//			logger.Printf("Listening on init activated %s", a.pprintAddr())
-	//		} else {
-	//			logger.Printf("Graceful handoff of %s with new pid %d and old pid %d", a.pprintAddr(), os.Getpid(), ppid)
-	//		}
-	//	} else {
-	//		logger.Printf("Serving %s with pid %d", a.pprintAddr(), os.Getpid())
-	//	}
-	//}
-	//
-	//// Start serving.
-	//a.serve()
-	 a.ListenAndServe()
+	a.listenAndServe()
 
 	// Close the parent if we inherited and it wasn't init that started us.
 	if didInherit && ppid != 1 {
@@ -192,24 +175,24 @@ func (a *app) run() error {
 			return fmt.Errorf("failed to close parent: %s", err)
 		}
 	}
-
-	waitdone := make(chan struct{})
-	go func() {
-		defer close(waitdone)
-		a.wait()
-	}()
-
+	//
+	//waitdone := make(chan struct{})
+	//go func() {
+	//	defer close(waitdone)
+	//	a.wait()
+	//}()
+	//
 	select {
 	case err := <-a.errors:
 		if err == nil {
 			panic("unexpected nil error")
 		}
 		return err
-	case <-waitdone:
-		if logger != nil {
-			logger.Printf("Exiting pid %d.", os.Getpid())
-		}
-		return nil
+		//case <-waitdone:
+		//	if logger != nil {
+		//		logger.Printf("Exiting pid %d.", os.Getpid())
+		//	}
+		//	return nil
 	}
 }
 
@@ -225,9 +208,9 @@ func (a *app) run() error {
 
 // Serve will serve the given http.Servers and will monitor for signals
 // allowing for graceful termination (SIGTERM) or restart (SIGUSR2).
-func Serve(servers ...interface{}) error {
+func Serve(servers ...interface{}) {
 	a := newApp(servers)
-	return a.run()
+	a.listenAndServe()
 }
 
 // PreStartProcess configures a callback to trigger during graceful restart

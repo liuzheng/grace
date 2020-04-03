@@ -3,6 +3,7 @@
 package tcp
 
 import (
+	"context"
 	"github.com/facebookgo/clock"
 	"github.com/facebookgo/stats"
 	"net"
@@ -24,7 +25,11 @@ type TcpServer struct {
 func (t *TcpServer) ListenAndServe() {
 	reflect.ValueOf(t.Server).MethodByName("ListenAndServe").Call([]reflect.Value{})
 }
-
+func (t *TcpServer) Shutdown(ctx context.Context) {
+	reflect.ValueOf(t.Server).MethodByName("Shutdown").Call([]reflect.Value{
+		reflect.ValueOf(ctx),
+	})
+}
 func Gen(server interface{}) *TcpServer {
 	return &TcpServer{
 		Server: server,
