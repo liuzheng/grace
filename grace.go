@@ -112,20 +112,20 @@ func (a *app) listenAndServe() {
 	}
 }
 
-//func (a *app) wait() {
-//	var wg sync.WaitGroup
-//	wg.Add(len(a.TcpDownServer) * 2) // Wait & Stop
-//	go a.signalHandler(&wg)
-//	for _, s := range a.TcpDownServer {
-//		go func(s tcp.Server) {
-//			defer wg.Done()
-//			if err := s.Wait(); err != nil {
-//				a.errors <- err
-//			}
-//		}(s)
-//	}
-//	wg.Wait()
-//}
+func (a *app) wait() {
+	var wg sync.WaitGroup
+	wg.Add(len(a.TcpDownServer)) // Wait & Stop
+	go a.signalHandler(&wg)
+	//for _, s := range a.TcpDownServer {
+	//	go func(s tcp.Server) {
+	//		defer wg.Done()
+	//		if err := s.Wait(); err != nil {
+	//			a.errors <- err
+	//		}
+	//	}(s)
+	//}
+	wg.Wait()
+}
 
 func (a *app) shutdown(wg *sync.WaitGroup) {
 	for _, s := range a.TCPServers {
@@ -167,7 +167,7 @@ func (a *app) signalHandler(wg *sync.WaitGroup) {
 }
 
 func (a *app) run() error {
-	a.listenAndServe()
+	go a.listenAndServe()
 
 	// Close the parent if we inherited and it wasn't init that started us.
 	if didInherit && ppid != 1 {
@@ -175,24 +175,24 @@ func (a *app) run() error {
 			return fmt.Errorf("failed to close parent: %s", err)
 		}
 	}
-	//
-	//waitdone := make(chan struct{})
-	//go func() {
-	//	defer close(waitdone)
-	//	a.wait()
-	//}()
-	//
+
+	waitdone := make(chan struct{})
+	go func() {
+		defer close(waitdone)
+		a.wait()
+	}()
+
 	select {
 	case err := <-a.errors:
 		if err == nil {
 			panic("unexpected nil error")
 		}
 		return err
-		//case <-waitdone:
-		//	if logger != nil {
-		//		logger.Printf("Exiting pid %d.", os.Getpid())
-		//	}
-		//	return nil
+	case <-waitdone:
+		if logger != nil {
+			logger.Printf("Exiting pid %d.", os.Getpid())
+		}
+		return nil
 	}
 }
 
@@ -210,7 +210,7 @@ func (a *app) run() error {
 // allowing for graceful termination (SIGTERM) or restart (SIGUSR2).
 func Serve(servers ...interface{}) {
 	a := newApp(servers)
-	a.listenAndServe()
+	a.run()
 }
 
 // PreStartProcess configures a callback to trigger during graceful restart
