@@ -40,7 +40,7 @@ func newHandler(name string) http.Handler {
 		time.Sleep(duration)
 		fmt.Fprintf(
 			w,
-			"%s started at %s slept for %d nanoseconds from pid %d.\n",
+			"%s started ats %s slept for %d nanoseconds from pid %d.\n",
 			name,
 			now,
 			duration.Nanoseconds(),
