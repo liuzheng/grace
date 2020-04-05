@@ -76,7 +76,7 @@ func (a *app) serve() {
   //}
   //var err error
   for i, s := range a.TCPServers {
-    s.Serve(a.listeners[i])
+    go s.Serve(a.listeners[i])
   }
 }
 
@@ -158,7 +158,7 @@ func Serve(servers ...interface{}) error {
     }
     return err
   case <-waitdone:
-      fmt.Printf("Exiting pid %d.\r\n", os.Getpid())
+    fmt.Printf("Exiting pid %d.\r\n", os.Getpid())
     return nil
   }
 }
