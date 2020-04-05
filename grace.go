@@ -23,7 +23,7 @@ type app struct {
   servers []interface{}
 
   //UdpServers  []*net.UDPConn
-  TCPServers []*tcp.TcpServer
+  TCPServers []*tcp.Server
   //unixServers []*net.UnixListener
 
   net *gracenet.Net
@@ -99,7 +99,7 @@ func (a *app) wait() {
 
 func (a *app) shutdown(wg *sync.WaitGroup) {
   for _, s := range a.TCPServers {
-    go func(s *tcp.TcpServer) {
+    go func(s *tcp.Server) {
       defer wg.Done()
       ctx, _ := context.WithTimeout(context.Background(), 20*time.Second)
       s.Shutdown(ctx)
@@ -158,7 +158,7 @@ func Serve(servers ...interface{}) error {
     }
     return err
   case <-waitdone:
-      fmt.Printf("Exiting pid %d.", os.Getpid())
+      fmt.Printf("Exiting pid %d.\r\n", os.Getpid())
     return nil
   }
 }
