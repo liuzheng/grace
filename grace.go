@@ -1,28 +1,22 @@
-// Package gracehttp provides easy to use graceful restart
-// functionality for HTTP server.
 package grace
 
 import (
   "context"
   "fmt"
-  "log"
+  "github.com/liuzheng/grace/pkg/gracenet"
+  "github.com/liuzheng/grace/pkg/tcp"
+  "net"
   "os"
   "os/signal"
   "sync"
   "syscall"
   "time"
-
-  "github.com/liuzheng/grace/pkg/gracenet"
-  "github.com/liuzheng/grace/pkg/tcp"
 )
 
 var (
-  logger     *log.Logger
   didInherit = os.Getenv("LISTEN_FDS") != ""
   ppid       = os.Getppid()
 )
-
-type option func(*app)
 
 // An app contains one or more servers and associated configuration.
 type app struct {
@@ -35,6 +29,7 @@ type app struct {
   net *gracenet.Net
 
   //listeners map[string]net.Listener
+  listeners []net.Listener
   //tcpListeners []net.Listener
 
   preStartProcess func() error
@@ -44,10 +39,11 @@ type app struct {
 }
 
 func newApp(servers []interface{}) *app {
-  App := app{
-    servers:   servers,
-    net:       &gracenet.Net{},
+  return &app{
+    servers: servers,
+    net:     &gracenet.Net{},
     //listeners: map[string]net.Listener{},
+    listeners: make([]net.Listener, 0, len(servers)),
     //sds:       make([]httpdown.Server, 0, len(servers)),
 
     preStartProcess: func() error { return nil },
@@ -57,25 +53,46 @@ func newApp(servers []interface{}) *app {
     // StartProcess error.
     errors: make(chan error, 1+(len(servers)*2)),
   }
-  for _, server := range servers {
-    t := tcp.Gen(server)
-    t.Listener, _ = App.net.Listen("tcp", t.Addr)
-    App.TCPServers = append(App.TCPServers, t)
-    //App.listeners[t.Addr] = t.Listener
+}
+func (a *app) listen() error {
+  for _, s := range a.servers {
+    t := tcp.Gen(s)
+    a.TCPServers = append(a.TCPServers, t)
+
+    l, err := a.net.Listen("tcp", t.Addr)
+    if err != nil {
+      return err
+    }
+    //if s.TLSConfig != nil {
+    //  l = tls.NewListener(l, s.TLSConfig)
+    //}
+    a.listeners = append(a.listeners, l)
   }
-  return &App
+  return nil
+}
+func (a *app) serve() {
+  //for i, s := range a.servers {
+  //  a.sds = append(a.sds, a.http.Serve(s, a.listeners[i]))
+  //}
+  //var err error
+  for i, s := range a.TCPServers {
+    s.Serve(a.listeners[i])
+  }
 }
 
-func (a *app) listenAndServe() {
-  //var err error
-  for _, s := range a.TCPServers {
-    s.ListenAndServe()
+func (a *app) listenAndServe() error {
+  // Acquire Listeners
+  if err := a.listen(); err != nil {
+    return err
   }
+  a.serve()
+
+  return nil
 }
 
 func (a *app) wait() {
   var wg sync.WaitGroup
-  wg.Add(len(a.TCPServers)) // Wait & Stop
+  wg.Add(len(a.servers)) // Wait & Stop
   go a.signalHandler(&wg)
   wg.Wait()
 }
@@ -89,7 +106,6 @@ func (a *app) shutdown(wg *sync.WaitGroup) {
     }(s)
   }
 }
-
 func (a *app) signalHandler(wg *sync.WaitGroup) {
   ch := make(chan os.Signal, 10)
   signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM, syscall.SIGUSR2)
@@ -142,9 +158,7 @@ func Serve(servers ...interface{}) error {
     }
     return err
   case <-waitdone:
-    if logger != nil {
-      logger.Printf("Exiting pid %d.", os.Getpid())
-    }
+      fmt.Printf("Exiting pid %d.", os.Getpid())
     return nil
   }
 }
