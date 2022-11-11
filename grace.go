@@ -2,6 +2,7 @@ package grace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -136,7 +137,23 @@ func (a *app) signalHandler(wg *sync.WaitGroup) {
 // Serve will serve the given http.Servers and will monitor for signals
 // allowing for graceful termination (SIGTERM) or restart (SIGUSR2).
 func Serve(servers ...interface{}) error {
-	a := newApp(servers)
+	Servers := []interface{}{}
+	if len(servers) > 0 {
+		for _, s := range servers {
+			switch x := s.(type) {
+			case []interface{}:
+				Servers = append(Servers, x...)
+			case interface{}:
+				Servers = append(Servers, x)
+			default:
+				return errors.New("unknown type error")
+			}
+		}
+	} else {
+		return errors.New("empty servers")
+	}
+	a := newApp(Servers)
+
 	go a.listenAndServe()
 
 	// Close the parent if we inherited and it wasn't init that started us.
