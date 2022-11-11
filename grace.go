@@ -56,7 +56,7 @@ func newApp(servers []*GraceServer) *app {
 }
 func (a *app) listen() error {
 	for _, s := range a.servers {
-		err := s.Listen()
+		err := (*s).Listen()
 		if err != nil {
 			return err
 		}
@@ -68,7 +68,7 @@ func (a *app) listen() error {
 }
 func (a *app) serve() {
 	for _, s := range a.servers {
-		go s.Serve()
+		go (*s).Serve()
 	}
 }
 
