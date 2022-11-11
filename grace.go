@@ -26,7 +26,7 @@ type GraceServer interface {
 
 // An app contains one or more servers and associated configuration.
 type app struct {
-	servers []GraceServer
+	servers []*GraceServer
 
 	//unixServers []*net.UnixListener
 
@@ -41,7 +41,7 @@ type app struct {
 	errors          chan error
 }
 
-func newApp(servers []GraceServer) *app {
+func newApp(servers []*GraceServer) *app {
 	return &app{
 		servers: servers,
 		net:     &gracenet.Net{},
@@ -96,7 +96,7 @@ func (a *app) shutdown(wg *sync.WaitGroup) {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
 			s.Shutdown(ctx)
-		}(s)
+		}(*s)
 	}
 }
 func (a *app) signalHandler(wg *sync.WaitGroup) {
@@ -128,16 +128,16 @@ func (a *app) signalHandler(wg *sync.WaitGroup) {
 // Serve will serve the given http.Servers and will monitor for signals
 // allowing for graceful termination (SIGTERM) or restart (SIGUSR2).
 func Serve(servers ...interface{}) error {
-	Servers := []GraceServer{}
+	Servers := []*GraceServer{}
 	if len(servers) > 0 {
 		for _, s := range servers {
 			switch x := s.(type) {
 			case []interface{}:
 				for _, ss := range x {
-					Servers = append(Servers, ss.(GraceServer))
+					Servers = append(Servers, ss.(*GraceServer))
 				}
 			case interface{}:
-				Servers = append(Servers, x.(GraceServer))
+				Servers = append(Servers, x.(*GraceServer))
 			default:
 				return errors.New("unknown type error")
 			}
