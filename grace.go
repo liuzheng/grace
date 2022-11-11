@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/liuzheng/grace/pkg/gracenet"
-	"github.com/liuzheng/grace/pkg/tcp"
 )
 
 var (
@@ -20,19 +19,22 @@ var (
 	ppid       = os.Getppid()
 )
 
+type GraceServer interface {
+	Listen() (net.Listener, error)
+	Serve(l net.Listener) error
+	Shutdown(ctx context.Context) error
+}
+
 // An app contains one or more servers and associated configuration.
 type app struct {
-	servers []interface{}
+	servers []GraceServer
 
-	//UdpServers  []*net.UDPConn
-	TCPServers []*tcp.Server
 	//unixServers []*net.UnixListener
 
 	net *gracenet.Net
 
 	//listeners map[string]net.Listener
 	listeners []net.Listener
-	//tcpListeners []net.Listener
 
 	preStartProcess func() error
 	preKillProcess  func() error
@@ -40,13 +42,11 @@ type app struct {
 	errors          chan error
 }
 
-func newApp(servers []interface{}) *app {
+func newApp(servers []GraceServer) *app {
 	return &app{
-		servers: servers,
-		net:     &gracenet.Net{},
-		//listeners: map[string]net.Listener{},
+		servers:   servers,
+		net:       &gracenet.Net{},
 		listeners: make([]net.Listener, 0, len(servers)),
-		//sds:       make([]httpdown.Server, 0, len(servers)),
 
 		preStartProcess: func() error { return nil },
 		preKillProcess:  func() error { return nil },
@@ -58,10 +58,7 @@ func newApp(servers []interface{}) *app {
 }
 func (a *app) listen() error {
 	for _, s := range a.servers {
-		t := tcp.Gen(s)
-		a.TCPServers = append(a.TCPServers, t)
-
-		l, err := a.net.Listen("tcp", t.Addr)
+		l, err := s.Listen()
 		if err != nil {
 			return err
 		}
@@ -73,11 +70,7 @@ func (a *app) listen() error {
 	return nil
 }
 func (a *app) serve() {
-	//for i, s := range a.servers {
-	//  a.sds = append(a.sds, a.http.Serve(s, a.listeners[i]))
-	//}
-	//var err error
-	for i, s := range a.TCPServers {
+	for i, s := range a.servers {
 		go s.Serve(a.listeners[i])
 	}
 }
@@ -100,10 +93,11 @@ func (a *app) wait() {
 }
 
 func (a *app) shutdown(wg *sync.WaitGroup) {
-	for _, s := range a.TCPServers {
-		go func(s *tcp.Server) {
+	for _, s := range a.servers {
+		go func(s GraceServer) {
 			defer wg.Done()
-			ctx, _ := context.WithTimeout(context.Background(), 20*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
 			s.Shutdown(ctx)
 		}(s)
 	}
@@ -137,14 +131,16 @@ func (a *app) signalHandler(wg *sync.WaitGroup) {
 // Serve will serve the given http.Servers and will monitor for signals
 // allowing for graceful termination (SIGTERM) or restart (SIGUSR2).
 func Serve(servers ...interface{}) error {
-	Servers := []interface{}{}
+	Servers := []GraceServer{}
 	if len(servers) > 0 {
 		for _, s := range servers {
 			switch x := s.(type) {
 			case []interface{}:
-				Servers = append(Servers, x...)
+				for _, ss := range x {
+					Servers = append(Servers, ss.(GraceServer))
+				}
 			case interface{}:
-				Servers = append(Servers, x)
+				Servers = append(Servers, x.(GraceServer))
 			default:
 				return errors.New("unknown type error")
 			}
