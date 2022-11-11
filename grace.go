@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"os/signal"
 	"sync"
@@ -20,8 +19,8 @@ var (
 )
 
 type GraceServer interface {
-	Listen() (net.Listener, error)
-	Serve(l net.Listener) error
+	Listen() error
+	Serve() error
 	Shutdown(ctx context.Context) error
 }
 
@@ -34,7 +33,7 @@ type app struct {
 	net *gracenet.Net
 
 	//listeners map[string]net.Listener
-	listeners []net.Listener
+	// listeners []net.Listener
 
 	preStartProcess func() error
 	preKillProcess  func() error
@@ -44,9 +43,8 @@ type app struct {
 
 func newApp(servers []GraceServer) *app {
 	return &app{
-		servers:   servers,
-		net:       &gracenet.Net{},
-		listeners: make([]net.Listener, 0, len(servers)),
+		servers: servers,
+		net:     &gracenet.Net{},
 
 		preStartProcess: func() error { return nil },
 		preKillProcess:  func() error { return nil },
@@ -58,20 +56,19 @@ func newApp(servers []GraceServer) *app {
 }
 func (a *app) listen() error {
 	for _, s := range a.servers {
-		l, err := s.Listen()
+		err := s.Listen()
 		if err != nil {
 			return err
 		}
 		//if s.TLSConfig != nil {
 		//  l = tls.NewListener(l, s.TLSConfig)
 		//}
-		a.listeners = append(a.listeners, l)
 	}
 	return nil
 }
 func (a *app) serve() {
-	for i, s := range a.servers {
-		go s.Serve(a.listeners[i])
+	for _, s := range a.servers {
+		go s.Serve()
 	}
 }
 
