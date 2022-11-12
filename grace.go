@@ -19,8 +19,7 @@ var (
 )
 
 type GraceServer interface {
-	Listen() error
-	Serve() error
+	ListenAndServe() error
 	Shutdown(ctx context.Context) error
 }
 
@@ -54,31 +53,11 @@ func newApp(servers []interface{}) *app {
 		errors: make(chan error, 1+(len(servers)*2)),
 	}
 }
-func (a *app) listen() error {
-	for _, s := range a.servers {
-		err := s.(GraceServer).Listen()
-		if err != nil {
-			return err
-		}
-		//if s.TLSConfig != nil {
-		//  l = tls.NewListener(l, s.TLSConfig)
-		//}
-	}
-	return nil
-}
-func (a *app) serve() {
-	for _, s := range a.servers {
-		go s.(GraceServer).Serve()
-	}
-}
 
 func (a *app) listenAndServe() error {
-	// Acquire Listeners
-	if err := a.listen(); err != nil {
-		fmt.Println(err)
-		return err
+	for _, s := range a.servers {
+		go s.(GraceServer).ListenAndServe()
 	}
-	a.serve()
 
 	return nil
 }
